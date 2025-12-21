@@ -37,8 +37,8 @@ Si vous souhaitez faire tourner le projet sur votre machine :
 ### 1. Cloner le projet
 
 ```bash
-git clone https://github.com/TON_USER/VivreAutrement-App.git
-cd VivreAutrement-App
+git clone https://github.com/Linwe-e/VivreAutrement_app.git
+cd VivreAutrement_app
 ```
 
 ### 2. Environnement virtuel (Recommandé)
