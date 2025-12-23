@@ -12,9 +12,8 @@ st.title("🛠️ Matériauthèque - Vivre Autrement")
 # 1. Connexion Google Sheets
 # -----------------------------------------------------
 
-@st.cache_resource
 def get_gspread_client():
-    """Crée et met en cache le client Google Sheets authentifié."""
+    """Crée un client Google Sheets authentifié (sans cache pour éviter les sessions expirées)."""
     service_account_info = st.secrets["connections"]["gsheets"]["service_account"]
 
     if isinstance(service_account_info, str):
@@ -38,14 +37,18 @@ def load_data():
     client = get_gspread_client()
     spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
     sheet = client.open_by_url(spreadsheet_url)
-
-    # Charge automatiquement la 1ère feuille
     worksheet = sheet.get_worksheet(0)
-
     data = worksheet.get_all_records()
     df = pd.DataFrame(data)
+    return df
 
-    return df, worksheet
+
+def get_worksheet():
+    """Retourne un worksheet frais pour les opérations d'écriture."""
+    client = get_gspread_client()
+    spreadsheet_url = st.secrets["connections"]["gsheets"]["spreadsheet"]
+    sheet = client.open_by_url(spreadsheet_url)
+    return sheet.get_worksheet(0)
 
 
 # -----------------------------------------------------
@@ -53,7 +56,7 @@ def load_data():
 # -----------------------------------------------------
 
 try:
-    df, worksheet = load_data()
+    df = load_data()
 
     required_cols = ["Objet", "Statut", "Emprunteur"]
     if not all(col in df.columns for col in required_cols):
@@ -63,7 +66,47 @@ try:
     st.success(f"📦 {len(df)} objets dans la matériauthèque")
 
     st.subheader("📋 Liste complète")
-    st.dataframe(df, use_container_width=True)
+    st.dataframe(df, width='stretch')
+
+    # -----------------------------------------------------
+    # Ajouter un nouvel objet
+    # -----------------------------------------------------
+    st.divider()
+    
+    if st.button("➕ Ajouter un nouvel objet"):
+        st.session_state["show_add_form"] = True
+    
+    if st.session_state.get("show_add_form", False):
+        with st.form("add_objet_form", clear_on_submit=True):
+            st.subheader("Nouvel objet")
+            new_objet = st.text_input("Nom de l'objet :")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                submitted = st.form_submit_button("✅ Ajouter", width='stretch')
+            with col2:
+                cancelled = st.form_submit_button("❌ Annuler", width='stretch')
+            
+            if cancelled:
+                st.session_state["show_add_form"] = False
+                st.rerun()
+                
+            if submitted:
+                if new_objet.strip() == "":
+                    st.warning("Veuillez indiquer un nom d'objet.")
+                else:
+                    try:
+                        worksheet = get_worksheet()
+                        worksheet.append_row([new_objet, "Libre", ""])
+                        
+                        # Vider le cache
+                        load_data.clear()
+                        
+                        st.session_state["show_add_form"] = False
+                        st.success(f"🎉 L'objet '{new_objet}' a été ajouté !")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ Erreur lors de l'ajout : {e}")
 
     # -----------------------------------------------------
     # Zone emprunt / rendu
@@ -90,16 +133,36 @@ try:
             if new_user.strip() == "":
                 st.warning("Veuillez indiquer votre nom.")
             else:
-                worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Statut") + 1, "Emprunté")
-                worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Emprunteur") + 1, new_user)
-                st.success(f"🎉 {selected_obj} a été emprunté par {new_user} !")
+                try:
+                    # Créer une connexion fraîche pour l'écriture
+                    worksheet = get_worksheet()
+                    worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Statut") + 1, "Prêt en cours")
+                    worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Emprunteur") + 1, new_user)
+                    
+                    # Vider le cache
+                    load_data.clear()
+                    
+                    st.success(f"🎉 {selected_obj} a été emprunté par {new_user} !")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Erreur lors de l'emprunt : {e}")
 
     # --- Rendre ---
     if statut == "Prêt en cours":
         if st.button("📤 Rendre l'objet"):
-            worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Statut") + 1, "Disponible")
-            worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Emprunteur") + 1, "")
-            st.success(f"👍 {selected_obj} a été rendu !")
+            try:
+                # Créer une connexion fraîche pour l'écriture
+                worksheet = get_worksheet()
+                worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Statut") + 1, "Libre")
+                worksheet.update_cell(obj_row_index + 2, df.columns.get_loc("Emprunteur") + 1, "")
+            
+                # Vider le cache
+                load_data.clear()
+                
+                st.success(f"👍 {selected_obj} a été rendu !")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ Erreur lors du rendu : {e}")
 
 except Exception as e:
     st.error("❌ Impossible de charger les données")
